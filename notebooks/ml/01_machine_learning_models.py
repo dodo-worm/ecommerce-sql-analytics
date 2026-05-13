@@ -354,100 +354,124 @@ joblib.dump(
     '../models/product_recommendation_svd.pkl'
 )
 # ============================================
-# 4. SALES PREDICTION
+# 4. SALES PREDICTION (TIME SERIES)
 # ============================================
 
 print("\n" + "="*60)
 print("SALES PREDICTION")
 print("="*60)
 
+from sklearn.model_selection import TimeSeriesSplit
+from xgboost import XGBRegressor
+
 # Load monthly revenue data
 monthly_revenue = pd.read_csv('../data/processed/monthly_revenue.csv')
 
-# Prepare features for sales prediction
-monthly_revenue['year'] = monthly_revenue['Year-Month'].str[:4].astype(int)
-monthly_revenue['month'] = monthly_revenue['Year-Month'].str[5:].astype(int)
-
-# Create lag features
-monthly_revenue['revenue_lag1'] = monthly_revenue['Total Revenue'].shift(1)
-monthly_revenue['revenue_lag2'] = monthly_revenue['Total Revenue'].shift(2)
-monthly_revenue['orders_lag1'] = monthly_revenue['Total Orders'].shift(1)
-
-# Create moving average features
-monthly_revenue['revenue_ma3'] = monthly_revenue['Total Revenue'].rolling(window=3).mean()
-monthly_revenue['orders_ma3'] = monthly_revenue['Total Orders'].rolling(window=3).mean()
-
-# Drop NaN values
-monthly_revenue_clean = monthly_revenue.dropna()
-
-# Select features
-sales_features = ['year', 'month', 'revenue_lag1', 'revenue_lag2', 'orders_lag1',
-                  'revenue_ma3', 'orders_ma3']
-
-X_sales = monthly_revenue_clean[sales_features]
-y_sales = monthly_revenue_clean['Total Revenue']
-
-# Split data (use last 3 months for testing)
-X_train_sales, X_test_sales, y_train_sales, y_test_sales = train_test_split(
-    X_sales, y_sales, test_size=0.25, shuffle=False
+# Clean date column
+monthly_revenue['Year-Month'] = pd.to_datetime(
+    monthly_revenue['Year-Month']
 )
 
-print(f"\nTraining set: {X_train_sales.shape}")
-print(f"Test set: {X_test_sales.shape}")
+monthly_revenue = monthly_revenue.sort_values(
+    'Year-Month'
+).reset_index(drop=True)
 
-# Train regression models
-print("\n--- Training Sales Prediction Models ---")
+# Feature engineering
+monthly_revenue['year'] = monthly_revenue['Year-Month'].dt.year
+monthly_revenue['month'] = monthly_revenue['Year-Month'].dt.month
+monthly_revenue['quarter'] = monthly_revenue['Year-Month'].dt.quarter
 
-# Model 1: Random Forest Regressor
-rf_reg = RandomForestRegressor(random_state=42, n_estimators=100)
-rf_reg.fit(X_train_sales, y_train_sales)
+# Lag features
+monthly_revenue['revenue_lag1'] = monthly_revenue['Total Revenue'].shift(1)
+monthly_revenue['revenue_lag2'] = monthly_revenue['Total Revenue'].shift(2)
+monthly_revenue['revenue_lag3'] = monthly_revenue['Total Revenue'].shift(3)
 
-# Model 2: XGBoost Regressor
-xgb_reg = XGBRegressor(random_state=42, n_estimators=100)
-xgb_reg.fit(X_train_sales, y_train_sales)
+monthly_revenue['orders_lag1'] = monthly_revenue['Total Orders'].shift(1)
 
-# Evaluate regression models
-def evaluate_regression_model(model, X_test, y_test, model_name):
-    """Evaluate regression model."""
-    y_pred = model.predict(X_test)
+# Rolling averages
+monthly_revenue['revenue_ma3'] = (
+    monthly_revenue['Total Revenue']
+    .rolling(window=3)
+    .mean()
+)
+
+monthly_revenue['orders_ma3'] = (
+    monthly_revenue['Total Orders']
+    .rolling(window=3)
+    .mean()
+)
+
+monthly_revenue = monthly_revenue.dropna()
+
+sales_features = [
+    'year',
+    'month',
+    'quarter',
+    'revenue_lag1',
+    'revenue_lag2',
+    'revenue_lag3',
+    'orders_lag1',
+    'revenue_ma3',
+    'orders_ma3'
+]
+
+X_sales = monthly_revenue[sales_features]
+y_sales = monthly_revenue['Total Revenue']
+
+# -------------------------------
+# Time Series Cross Validation
+# -------------------------------
+tscv = TimeSeriesSplit(n_splits=5)
+
+sales_results = []
+
+xgb_reg = XGBRegressor(
+    random_state=42,
+    n_estimators=200,
+    max_depth=4,
+    learning_rate=0.05
+)
+
+fold = 1
+
+for train_idx, test_idx in tscv.split(X_sales):
+    X_train, X_test = X_sales.iloc[train_idx], X_sales.iloc[test_idx]
+    y_train, y_test = y_sales.iloc[train_idx], y_sales.iloc[test_idx]
+
+    xgb_reg.fit(X_train, y_train)
+
+    y_pred = xgb_reg.predict(X_test)
 
     mse = mean_squared_error(y_test, y_pred)
     mae = mean_absolute_error(y_test, y_pred)
     rmse = np.sqrt(mse)
     r2 = r2_score(y_test, y_pred)
 
-    print(f"\n{model_name} Results:")
-    print(f"  MSE:  {mse:.2f}")
-    print(f"  MAE:  {mae:.2f}")
-    print(f"  RMSE: {rmse:.2f}")
-    print(f"  R²:   {r2:.4f}")
-
-    return {
-        'model': model_name,
+    sales_results.append({
+        'fold': fold,
         'mse': mse,
         'mae': mae,
         'rmse': rmse,
         'r2': r2
-    }
+    })
 
-sales_results = []
-sales_results.append(evaluate_regression_model(rf_reg, X_test_sales, y_test_sales, "Random Forest"))
-sales_results.append(evaluate_regression_model(xgb_reg, X_test_sales, y_test_sales, "XGBoost"))
+    fold += 1
 
-# Compare models
 sales_results_df = pd.DataFrame(sales_results)
-print("\n" + "="*60)
-print("SALES MODEL COMPARISON")
-print("="*60)
+
+print("\nSales Prediction Cross Validation Results:")
 print(sales_results_df)
 
-# Feature importance for sales prediction
+print("\nAverage Performance:")
+print(sales_results_df.mean())
+
+# Feature importance
 feature_importance_sales = pd.DataFrame({
     'feature': sales_features,
-    'importance': rf_reg.feature_importances_
+    'importance': xgb_reg.feature_importances_
 }).sort_values('importance', ascending=False)
 
-print("\n--- Feature Importance for Sales Prediction ---")
+print("\nTop Sales Features:")
 print(feature_importance_sales)
 
 # ============================================
