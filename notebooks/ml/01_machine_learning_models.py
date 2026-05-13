@@ -227,73 +227,132 @@ xgb_clf = XGBClassifier(
 log_reg.fit(X_train_churn_scaled, y_train_churn)
 rf_clf.fit(X_train_churn, y_train_churn)
 xgb_clf.fit(X_train_churn, y_train_churn)
+
 # ============================================
-# 3. PRODUCT RECOMMENDATION
+# 3. PRODUCT RECOMMENDATION (COLLABORATIVE FILTERING)
 # ============================================
 
 print("\n" + "="*60)
 print("PRODUCT RECOMMENDATION")
 print("="*60)
 
-# Load product data
-product_popularity = pd.read_csv('../data/processed/product_popularity.csv')
-products_df = pd.read_sql_query("SELECT * FROM products", sqlite3.connect('../data/sql/ecommerce.db'))
+import sqlite3
+from surprise import Dataset, Reader, SVD
+from surprise.model_selection import train_test_split as surprise_train_test_split
+from surprise.accuracy import rmse
 
-# Create product recommendation features
-product_features = product_popularity.merge(
-    products_df[['product_id', 'category_id', 'price', 'rating_avg', 'review_count']],
-    on='product_id'
-)
+conn = sqlite3.connect('../data/sql/ecommerce.db')
 
-# Create recommendation score
-product_features['recommendation_score'] = (
-    product_features['popularity_score_normalized'] * 0.4 +
-    (product_features['rating_avg'] / 5) * 0.3 +
-    (product_features['review_count'] / product_features['review_count'].max()) * 0.2 +
-    (1 - (product_features['price'] - product_features['price'].min()) /
-     (product_features['price'].max() - product_features['price'].min())) * 0.1
-)
-
-print("\n--- Top 10 Recommended Products ---")
-top_recommended = product_features.sort_values('recommendation_score', ascending=False).head(10)
-print(top_recommended[['product_id', 'product_name', 'recommendation_score', 'rating_avg', 'price']])
-
-# Collaborative filtering based on purchase patterns
-print("\n--- Building Collaborative Filtering Model ---")
-
-# Create user-item matrix
+# -------------------------------
+# Load purchase history
+# -------------------------------
 order_products = pd.read_sql_query("""
-    SELECT oi.order_id, oi.customer_id, oi.product_id, oi.quantity, oi.total_price
+    SELECT
+        o.customer_id,
+        oi.product_id,
+        SUM(oi.quantity) as purchase_count
     FROM order_items oi
-    JOIN orders o ON oi.order_id = o.order_id
+    JOIN orders o
+        ON oi.order_id = o.order_id
     WHERE o.status IN ('Delivered', 'Shipped')
-""", sqlite3.connect('../data/sql/ecommerce.db'))
+    GROUP BY o.customer_id, oi.product_id
+""", conn)
 
-# Create purchase frequency matrix
-user_item_matrix = order_products.groupby(['customer_id', 'product_id']).size().reset_index(name='purchase_count')
+print(f"Purchase interactions: {order_products.shape}")
 
-# Simple recommendation: products frequently bought together
-print("\n--- Frequently Bought Together (Top 5 Pairs) ---")
+# -------------------------------
+# Create surprise dataset
+# -------------------------------
+reader = Reader(rating_scale=(1, order_products['purchase_count'].max()))
 
-# Find product pairs bought together
-from collections import defaultdict
-product_pairs = defaultdict(int)
+data = Dataset.load_from_df(
+    order_products[['customer_id', 'product_id', 'purchase_count']],
+    reader
+)
 
-for customer_id in user_item_matrix['customer_id'].unique():
-    products = user_item_matrix[user_item_matrix['customer_id'] == customer_id]['product_id'].tolist()
-    products.sort()
-    for i in range(len(products)):
-        for j in range(i+1, len(products)):
-            product_pairs[(products[i], products[j])] += 1
+trainset, testset = surprise_train_test_split(
+    data,
+    test_size=0.2,
+    random_state=42
+)
 
-# Get top pairs
-top_pairs = sorted(product_pairs.items(), key=lambda x: x[1], reverse=True)[:5]
+# -------------------------------
+# Train collaborative filtering model
+# -------------------------------
+svd_model = SVD(
+    n_factors=100,
+    n_epochs=20,
+    random_state=42
+)
 
-for (prod1, prod2), count in top_pairs:
-    name1 = products_df[products_df['product_id'] == prod1]['product_name'].values[0]
-    name2 = products_df[products_df['product_id'] == prod2]['product_name'].values[0]
-    print(f"  {name1} + {name2}: {count} times")
+svd_model.fit(trainset)
 
+# Evaluate
+predictions = svd_model.test(testset)
+
+print("\nRecommendation Model Performance:")
+rmse(predictions)
+
+# -------------------------------
+# Generate recommendations
+# -------------------------------
+products_df = pd.read_sql_query(
+    "SELECT product_id, product_name FROM products",
+    conn
+)
+
+sample_customer = order_products['customer_id'].iloc[0]
+
+purchased_products = set(
+    order_products[
+        order_products['customer_id'] == sample_customer
+    ]['product_id']
+)
+
+all_products = set(products_df['product_id'])
+
+candidate_products = all_products - purchased_products
+
+recommendations = []
+
+for product_id in candidate_products:
+    pred = svd_model.predict(
+        uid=sample_customer,
+        iid=product_id
+    )
+
+    recommendations.append(
+        (product_id, pred.est)
+    )
+
+top_recommendations = sorted(
+    recommendations,
+    key=lambda x: x[1],
+    reverse=True
+)[:10]
+
+top_recommendation_df = pd.DataFrame(
+    top_recommendations,
+    columns=['product_id', 'predicted_score']
+)
+
+top_recommendation_df = top_recommendation_df.merge(
+    products_df,
+    on='product_id',
+    how='left'
+)
+
+print("\nTop 10 Recommendations:")
+print(top_recommendation_df)
+
+# -------------------------------
+# Save recommendation model
+# -------------------------------
+import joblib
+joblib.dump(
+    svd_model,
+    '../models/product_recommendation_svd.pkl'
+)
 # ============================================
 # 4. SALES PREDICTION
 # ============================================
