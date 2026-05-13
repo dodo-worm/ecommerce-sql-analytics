@@ -69,6 +69,86 @@ Techniques:
 - Matplotlib
 - Seaborn
 
+## Feature Engineering
+
+The project includes business-focused feature engineering for predictive analytics.
+
+### Customer Features
+- Recency (days since last purchase before cutoff date)
+- Frequency (historical order count)
+- Monetary value (historical spend)
+- Average order value
+- Purchase frequency
+- Discount usage ratio
+- Customer lifetime duration
+- Average basket size
+- Unique products purchased
+
+### Product Features
+- Customer-product interaction matrix
+- Purchase count per customer-product pair
+- Product recommendation candidate generation
+
+### Time-Series Features
+- Revenue lag (1, 2, 3 months)
+- Order lag features
+- 3-month rolling revenue average
+- 3-month rolling order average
+- Seasonal time features (month, quarter)
+
+---
+
+## Machine Learning Models
+
+### Customer Churn Prediction
+Models:
+- Logistic Regression
+- Random Forest
+- XGBoost
+
+Evaluation Metrics:
+- Accuracy
+- Precision
+- Recall
+- F1 Score
+- ROC-AUC
+
+---
+
+### Product Recommendation System
+Model:
+- SVD Collaborative Filtering (Matrix Factorization)
+
+Evaluation:
+- RMSE
+
+---
+
+### Sales Forecasting
+Model:
+- XGBoost Regressor
+
+Validation:
+- TimeSeriesSplit cross-validation
+
+Evaluation:
+- RMSE
+- MAE
+- R²
+
+---
+
+## SQL Analytics
+
+Advanced SQL analysis includes:
+- Top customers by revenue
+- Monthly revenue trends
+- Product sales performance
+- Repeat customer analysis
+- Customer segmentation
+- Regional sales insights
+- Retention analytics
+
 ### Machine Learning
 - Scikit-learn
 - XGBoost
@@ -102,6 +182,9 @@ ecommerce-sql-analytics/
 ├── models/
 ├── requirements.txt
 └── README.md
+
+
+
 ## Feature Engineering
 
 The project includes business-focused feature engineering for predictive analytics.
