@@ -1,0 +1,29 @@
+# E-Commerce Customer Analytics - Requirements
+# Python 3.8+
+
+# Data Manipulation
+pandas>=2.0.0
+numpy>=1.24.0
+
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+
+# Database
+sqlalchemy>=2.0.0
+
+# Utilities
+joblib>=1.3.0
+python-dateutil>=2.8.0
+
+# Jupyter (for notebook development)
+jupyter>=1.0.0
+ipykernel>=6.0.0
+
+# Optional: For MySQL connection
+# mysql-connector-python>=8.0.0
+# pymysql>=1.1.0
