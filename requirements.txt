@@ -28,3 +28,6 @@ ipykernel>=6.0.0
 # Optional: For MySQL connection
 # mysql-connector-python>=8.0.0
 # pymysql>=1.1.0
+
+streamlit
+plotly
