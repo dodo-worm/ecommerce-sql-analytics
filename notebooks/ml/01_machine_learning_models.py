@@ -37,121 +37,196 @@ print(f"Customer features loaded: {customer_features.shape}")
 print(f"\nColumns: {list(customer_features.columns)}")
 
 # ============================================
-# 2. CUSTOMER CHURN PREDICTION
+# 2. CUSTOMER CHURN PREDICTION (TEMPORAL SPLIT)
 # ============================================
 
 print("\n" + "="*60)
 print("CUSTOMER CHURN PREDICTION")
 print("="*60)
 
-# Define churn: customers who haven't purchased in the last 90 days
-churn_threshold_days = 90
-customer_features['is_churned'] = (customer_features['days_since_last_purchase'] > churn_threshold_days).astype(int)
+import sqlite3
 
-print(f"\nChurn threshold: {churn_threshold_days} days")
-print(f"Churned customers: {customer_features['is_churned'].sum()}")
-print(f"Active customers: {(customer_features['is_churned'] == 0).sum()}")
-print(f"Churn rate: {customer_features['is_churned'].mean():.2%}")
+conn = sqlite3.connect('../data/sql/ecommerce.db')
 
-# Select features for churn prediction
-churn_features = [
-    'order_count', 'total_spent', 'avg_order_value', 'std_order_value',
-    'days_since_last_purchase', 'days_since_first_purchase',
-    'avg_days_between_orders', 'last_order_vs_avg',
-    'discount_usage_rate', 'discount_percentage',
-    'category_diversity', 'avg_basket_size',
-    'recency_score', 'frequency_score', 'monetary_score',
-    'segment_encoded', 'rfm_segment_encoded'
+orders_df = pd.read_sql_query("SELECT * FROM orders", conn)
+orders_df['order_date'] = pd.to_datetime(orders_df['order_date'])
+
+completed_orders = orders_df[
+    orders_df['status'].isin(['Delivered', 'Shipped'])
+].copy()
+
+# -------------------------------
+# Define temporal cutoff
+# -------------------------------
+cutoff_date = pd.Timestamp('2024-10-01')
+prediction_window_days = 90
+prediction_end = cutoff_date + pd.Timedelta(days=prediction_window_days)
+
+print(f"Feature cutoff date: {cutoff_date}")
+print(f"Prediction window ends: {prediction_end}")
+
+# -------------------------------
+# Historical data only
+# -------------------------------
+historical_orders = completed_orders[
+    completed_orders['order_date'] < cutoff_date
 ]
 
-# Prepare data
-X_churn = customer_features[churn_features].copy()
-y_churn = customer_features['is_churned']
+future_orders = completed_orders[
+    (completed_orders['order_date'] >= cutoff_date) &
+    (completed_orders['order_date'] <= prediction_end)
+]
 
-# Handle missing values
-X_churn = X_churn.fillna(0)
+# -------------------------------
+# Build historical features
+# -------------------------------
+historical_features = historical_orders.groupby('customer_id').agg({
+    'order_id': 'count',
+    'total_amount': ['sum', 'mean', 'std'],
+    'discount_amount': ['sum', 'mean'],
+    'order_date': ['min', 'max']
+}).reset_index()
 
-# Split data
-X_train_churn, X_test_churn, y_train_churn, y_test_churn = train_test_split(
-    X_churn, y_churn, test_size=0.3, random_state=42, stratify=y_churn
+historical_features.columns = [
+    'customer_id',
+    'order_count',
+    'total_spent',
+    'avg_order_value',
+    'std_order_value',
+    'total_discount',
+    'avg_discount',
+    'first_order_date',
+    'last_order_date'
+]
+
+reference_date = cutoff_date
+
+historical_features['customer_lifetime_days'] = (
+    reference_date - historical_features['first_order_date']
+).dt.days
+
+historical_features['recency_days'] = (
+    reference_date - historical_features['last_order_date']
+).dt.days
+
+historical_features['purchase_frequency'] = (
+    historical_features['order_count'] /
+    historical_features['customer_lifetime_days'].replace(0, 1)
 )
 
-# Scale features
+historical_features['discount_ratio'] = (
+    historical_features['total_discount'] /
+    historical_features['total_spent'].replace(0, 1)
+)
+
+# -------------------------------
+# Product diversity
+# -------------------------------
+order_items_df = pd.read_sql_query("SELECT * FROM order_items", conn)
+
+historical_order_ids = historical_orders['order_id'].unique()
+
+historical_items = order_items_df[
+    order_items_df['order_id'].isin(historical_order_ids)
+]
+
+product_diversity = historical_items.groupby('customer_id').agg({
+    'product_id': 'nunique',
+    'quantity': 'mean'
+}).reset_index()
+
+product_diversity.columns = [
+    'customer_id',
+    'unique_products',
+    'avg_basket_size'
+]
+
+historical_features = historical_features.merge(
+    product_diversity,
+    on='customer_id',
+    how='left'
+)
+
+# -------------------------------
+# Build churn target
+# -------------------------------
+future_customers = future_orders['customer_id'].unique()
+
+historical_features['is_churned'] = ~historical_features[
+    'customer_id'
+].isin(future_customers)
+
+historical_features['is_churned'] = historical_features[
+    'is_churned'
+].astype(int)
+
+print("\nChurn distribution:")
+print(historical_features['is_churned'].value_counts())
+
+# -------------------------------
+# Features
+# -------------------------------
+churn_features = [
+    'order_count',
+    'total_spent',
+    'avg_order_value',
+    'std_order_value',
+    'total_discount',
+    'avg_discount',
+    'customer_lifetime_days',
+    'recency_days',
+    'purchase_frequency',
+    'discount_ratio',
+    'unique_products',
+    'avg_basket_size'
+]
+
+X_churn = historical_features[churn_features].fillna(0)
+y_churn = historical_features['is_churned']
+
+# -------------------------------
+# Split
+# -------------------------------
+X_train_churn, X_test_churn, y_train_churn, y_test_churn = train_test_split(
+    X_churn,
+    y_churn,
+    test_size=0.3,
+    random_state=42,
+    stratify=y_churn
+)
+
+# -------------------------------
+# Scale
+# -------------------------------
 scaler_churn = StandardScaler()
+
 X_train_churn_scaled = scaler_churn.fit_transform(X_train_churn)
 X_test_churn_scaled = scaler_churn.transform(X_test_churn)
 
-print(f"\nTraining set: {X_train_churn_scaled.shape}")
-print(f"Test set: {X_test_churn_scaled.shape}")
+# -------------------------------
+# Models
+# -------------------------------
+log_reg = LogisticRegression(
+    random_state=42,
+    max_iter=1000,
+    class_weight='balanced'
+)
 
-# Train multiple models
-print("\n--- Training Churn Prediction Models ---")
+rf_clf = RandomForestClassifier(
+    random_state=42,
+    n_estimators=200,
+    class_weight='balanced'
+)
 
-# Model 1: Logistic Regression
-log_reg = LogisticRegression(random_state=42, max_iter=1000)
+xgb_clf = XGBClassifier(
+    random_state=42,
+    n_estimators=200,
+    eval_metric='logloss'
+)
+
 log_reg.fit(X_train_churn_scaled, y_train_churn)
-
-# Model 2: Random Forest
-rf_clf = RandomForestClassifier(random_state=42, n_estimators=100)
 rf_clf.fit(X_train_churn, y_train_churn)
-
-# Model 3: XGBoost
-xgb_clf = XGBClassifier(random_state=42, n_estimators=100, use_label_encoder=False, eval_metric='logloss')
 xgb_clf.fit(X_train_churn, y_train_churn)
-
-# Evaluate models
-def evaluate_churn_model(model, X_test, y_test, model_name, scaled=False):
-    """Evaluate churn prediction model."""
-    if scaled:
-        y_pred = model.predict(X_test)
-        y_pred_proba = model.predict_proba(X_test)[:, 1]
-    else:
-        y_pred = model.predict(X_test)
-        y_pred_proba = model.predict_proba(X_test)[:, 1]
-
-    accuracy = accuracy_score(y_test, y_pred)
-    precision = precision_score(y_test, y_pred, average='binary')
-    recall = recall_score(y_test, y_pred, average='binary')
-    f1 = f1_score(y_test, y_pred, average='binary')
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
-
-    print(f"\n{model_name} Results:")
-    print(f"  Accuracy:  {accuracy:.4f}")
-    print(f"  Precision: {precision:.4f}")
-    print(f"  Recall:    {recall:.4f}")
-    print(f"  F1-Score:  {f1:.4f}")
-    print(f"  ROC-AUC:   {roc_auc:.4f}")
-
-    return {
-        'model': model_name,
-        'accuracy': accuracy,
-        'precision': precision,
-        'recall': recall,
-        'f1': f1,
-        'roc_auc': roc_auc
-    }
-
-churn_results = []
-churn_results.append(evaluate_churn_model(log_reg, X_test_churn_scaled, y_test_churn, "Logistic Regression", scaled=True))
-churn_results.append(evaluate_churn_model(rf_clf, X_test_churn, y_test_churn, "Random Forest"))
-churn_results.append(evaluate_churn_model(xgb_clf, X_test_churn, y_test_churn, "XGBoost"))
-
-# Compare models
-churn_results_df = pd.DataFrame(churn_results)
-print("\n" + "="*60)
-print("CHURN MODEL COMPARISON")
-print("="*60)
-print(churn_results_df)
-
-# Feature importance for best model (Random Forest)
-feature_importance_churn = pd.DataFrame({
-    'feature': churn_features,
-    'importance': rf_clf.feature_importances_
-}).sort_values('importance', ascending=False)
-
-print("\n--- Top 10 Important Features for Churn Prediction ---")
-print(feature_importance_churn.head(10))
-
 # ============================================
 # 3. PRODUCT RECOMMENDATION
 # ============================================
