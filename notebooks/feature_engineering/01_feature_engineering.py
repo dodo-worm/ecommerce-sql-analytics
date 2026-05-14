@@ -22,7 +22,7 @@ import sqlite3
 import os
 
 # Create database connection
-db_path = '../data/sql/ecommerce.db'
+db_path = 'data/sql/ecommerce.db'
 conn = sqlite3.connect(db_path)
 
 # Load data
