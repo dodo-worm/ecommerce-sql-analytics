@@ -17,6 +17,25 @@ It combines:
 The goal is to simulate a real-world e-commerce analytics environment where business data is transformed into actionable machine learning insights.
 
 ---
+## Project Visuals
+
+### Dashboard Preview
+![Dashboard](assets/dashboard.png)
+
+---
+
+### Churn Prediction Performance
+Comparison of ML models for customer churn prediction.
+
+![Churn Models](assets/churn_models.png)
+
+---
+
+### Sales Forecasting
+Actual vs predicted revenue trends.
+
+![Sales Forecast](assets/sales_forecast.png)
+
 
 ## Business Problems Solved
 
@@ -69,6 +88,7 @@ Techniques:
 - Matplotlib
 - Seaborn
 
+<<<<<<< Updated upstream
 ## Feature Engineering
 
 The project includes business-focused feature engineering for predictive analytics.
@@ -149,6 +169,8 @@ Advanced SQL analysis includes:
 - Regional sales insights
 - Retention analytics
 
+=======
+>>>>>>> Stashed changes
 ### Machine Learning
 - Scikit-learn
 - XGBoost
@@ -181,6 +203,10 @@ ecommerce-sql-analytics/
 ├── src/
 ├── models/
 ├── requirements.txt
+<<<<<<< Updated upstream
 └── README.md
 
 
+=======
+└── README.md
+>>>>>>> Stashed changes
