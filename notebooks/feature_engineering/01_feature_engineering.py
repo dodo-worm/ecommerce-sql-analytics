@@ -335,16 +335,16 @@ print("EXPORTING FEATURE ENGINEERED DATA")
 print("="*60)
 
 # Create output directory
-os.makedirs('../data/processed', exist_ok=True)
+os.makedirs('data/processed', exist_ok=True)
 
 # Export customer features
-customer_features.to_csv('../data/processed/customer_features.csv', index=False)
+customer_features.to_csv('data/processed/customer_features.csv', index=False)
 
 # Export product popularity
-product_popularity.to_csv('../data/processed/product_popularity.csv', index=False)
+product_popularity.to_csv('data/processed/product_popularity.csv', index=False)
 
 # Export RFM data
-rfm_data.to_csv('../data/processed/rfm_data.csv', index=False)
+rfm_data.to_csv('data/processed/rfm_data.csv', index=False)
 
 print("\nFeature engineered data exported successfully!")
 print("\nExported files:")
