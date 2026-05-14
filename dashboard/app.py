@@ -8,9 +8,9 @@ st.title('E-Commerce Customer Analytics Dashboard')
 
 @st.cache_data
 def load_data():
-    customer = pd.read_csv('data/processed/customer_features.csv')
-    product = pd.read_csv('data/processed/product_popularity.csv')
-    monthly = pd.read_csv('data/processed/monthly_revenue.csv')
+    customer = pd.read_csv('../data/processed/customer_features.csv')
+    product = pd.read_csv('../data/processed/product_popularity.csv')
+    monthly = pd.read_csv('../data/processed/monthly_revenue.csv')
     return customer, product, monthly
 
 customer, product, monthly = load_data()
