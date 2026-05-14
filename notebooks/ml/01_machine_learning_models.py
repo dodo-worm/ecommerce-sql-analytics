@@ -229,7 +229,7 @@ rf_clf.fit(X_train_churn, y_train_churn)
 xgb_clf.fit(X_train_churn, y_train_churn)
 
 # ============================================
-# 3. PRODUCT RECOMMENDATION (COLLABORATIVE FILTERING)
+# 3. PRODUCT RECOMMENDATION (COSINE SIMILARITY)
 # ============================================
 
 print("\n" + "="*60)
@@ -237,15 +237,10 @@ print("PRODUCT RECOMMENDATION")
 print("="*60)
 
 import sqlite3
-from surprise import Dataset, Reader, SVD
-from surprise.model_selection import train_test_split as surprise_train_test_split
-from surprise.accuracy import rmse
+from sklearn.metrics.pairwise import cosine_similarity
 
 conn = sqlite3.connect('../data/sql/ecommerce.db')
 
-# -------------------------------
-# Load purchase history
-# -------------------------------
 order_products = pd.read_sql_query("""
     SELECT
         o.customer_id,
@@ -258,100 +253,69 @@ order_products = pd.read_sql_query("""
     GROUP BY o.customer_id, oi.product_id
 """, conn)
 
-print(f"Purchase interactions: {order_products.shape}")
-
-# -------------------------------
-# Create surprise dataset
-# -------------------------------
-reader = Reader(rating_scale=(1, order_products['purchase_count'].max()))
-
-data = Dataset.load_from_df(
-    order_products[['customer_id', 'product_id', 'purchase_count']],
-    reader
-)
-
-trainset, testset = surprise_train_test_split(
-    data,
-    test_size=0.2,
-    random_state=42
-)
-
-# -------------------------------
-# Train collaborative filtering model
-# -------------------------------
-svd_model = SVD(
-    n_factors=100,
-    n_epochs=20,
-    random_state=42
-)
-
-svd_model.fit(trainset)
-
-# Evaluate
-predictions = svd_model.test(testset)
-
-print("\nRecommendation Model Performance:")
-rmse(predictions)
-
-# -------------------------------
-# Generate recommendations
-# -------------------------------
 products_df = pd.read_sql_query(
     "SELECT product_id, product_name FROM products",
     conn
 )
 
-sample_customer = order_products['customer_id'].iloc[0]
+# Create user-item matrix
+user_item_matrix = order_products.pivot_table(
+    index='customer_id',
+    columns='product_id',
+    values='purchase_count',
+    fill_value=0
+)
 
-purchased_products = set(
+# Compute similarity
+similarity_matrix = cosine_similarity(user_item_matrix)
+
+similarity_df = pd.DataFrame(
+    similarity_matrix,
+    index=user_item_matrix.index,
+    columns=user_item_matrix.index
+)
+
+sample_customer = user_item_matrix.index[0]
+
+similar_customers = similarity_df[sample_customer].sort_values(
+    ascending=False
+)[1:6].index
+
+sample_purchases = set(
     order_products[
         order_products['customer_id'] == sample_customer
     ]['product_id']
 )
 
-all_products = set(products_df['product_id'])
+recommended_products = order_products[
+    order_products['customer_id'].isin(similar_customers)
+]
 
-candidate_products = all_products - purchased_products
+recommended_products = recommended_products[
+    ~recommended_products['product_id'].isin(sample_purchases)
+]
 
-recommendations = []
-
-for product_id in candidate_products:
-    pred = svd_model.predict(
-        uid=sample_customer,
-        iid=product_id
-    )
-
-    recommendations.append(
-        (product_id, pred.est)
-    )
-
-top_recommendations = sorted(
-    recommendations,
-    key=lambda x: x[1],
-    reverse=True
-)[:10]
-
-top_recommendation_df = pd.DataFrame(
-    top_recommendations,
-    columns=['product_id', 'predicted_score']
+top_recommendations = (
+    recommended_products.groupby('product_id')['purchase_count']
+    .sum()
+    .sort_values(ascending=False)
+    .head(10)
+    .reset_index()
 )
 
-top_recommendation_df = top_recommendation_df.merge(
+top_recommendations = top_recommendations.merge(
     products_df,
-    on='product_id',
-    how='left'
+    on='product_id'
 )
 
-print("\nTop 10 Recommendations:")
-print(top_recommendation_df)
+print("\nTop 10 Recommended Products:")
+print(top_recommendations)
 
-# -------------------------------
-# Save recommendation model
-# -------------------------------
-import joblib
+os.makedirs('../models', exist_ok=True)
+
 joblib.dump(
-    svd_model,
-    '../models/product_recommendation_svd.pkl'
+    similarity_df,
+    '../models/customer_similarity.pkl'
 )
 # ============================================
 # 4. SALES PREDICTION (TIME SERIES)
